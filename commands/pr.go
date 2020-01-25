@@ -16,6 +16,7 @@ var (
 		Run: printHelp,
 		Usage: `
 pr list [-s <STATE>] [-h <HEAD>] [-b <BASE>] [-o <SORT_KEY> [-^]] [-f <FORMAT>] [-L <LIMIT>]
+pr search <QUERY> [<QUERY> ...]
 pr checkout <PR-NUMBER> [<BRANCH>]
 pr show [-uc] [-f <FORMAT>] [-h <HEAD>]
 pr show [-uc] [-f <FORMAT>] <PR-NUMBER>
@@ -26,6 +27,9 @@ pr show [-uc] [-f <FORMAT>] <PR-NUMBER>
 
 	* _list_:
 		List pull requests in the current repository.
+
+	* _search_:
+		Search pull requests in the current repository.
 
 	* _checkout_:
 		Check out the head of a pull request in a new branch.
@@ -173,12 +177,21 @@ hub-issue(1), hub-pull-request(1), hub(1)
 		--color
 `,
 	}
+
+	cmdSearchPr = &Command{
+		Key: "search",
+		Run: searchPr,
+		KnownFlags: `
+		-f, --format FORMAT
+`,
+	}
 )
 
 func init() {
 	cmdPr.Use(cmdListPulls)
 	cmdPr.Use(cmdCheckoutPr)
 	cmdPr.Use(cmdShowPr)
+	cmdPr.Use(cmdSearchPr)
 	CmdRunner.Use(cmdPr)
 }
 
@@ -277,6 +290,47 @@ func checkoutPr(command *Command, args *Args) {
 	utils.Check(err)
 
 	args.Replace(args.Executable, "checkout", newArgs...)
+}
+
+func searchPr(command *Command, args *Args) {
+	words := args.Words()
+	localRepo, err := github.LocalRepo();
+	utils.Check(err);
+
+	project, err := localRepo.MainProject();
+	utils.Check(err);
+
+	gh := github.NewClient(project.Host)
+	args.NoForward()
+	if args.Noop {
+		ui.Printf("Would search for pull requests in %s\n", project)
+		return
+	}
+	flagPullRequestFormat := args.Flag.Value("--format")
+	if !args.Flag.HasReceived("--format") {
+		flagPullRequestFormat = "%pC%>(8)%i%Creset  %t%  l%n"
+	}
+
+	if len(words) == 0 {
+		utils.Check(fmt.Errorf("No search term provided"));
+	}
+
+	query := strings.Join(words, " ")
+	pulls, err := gh.SearchPullRequests(project, query);
+	utils.Check(err);
+
+	colorize := colorizeOutput(args.Flag.HasReceived("--color"), args.Flag.Value("--color"))
+
+	// PullRequest objects returned by search query lack "Base" and
+	// "Head" fields. They must be set to something, otherwise
+	// "formatPullRequest" will crash.
+	for _, pr := range pulls {
+		repo := github.Repository { Owner: pr.User }
+		fake := github.PullRequestSpec{ Repo: &repo }
+		pr.Head = &fake;
+		pr.Base = &fake;
+		ui.Print(formatPullRequest(pr, flagPullRequestFormat, colorize))
+	}
 }
 
 func showPr(command *Command, args *Args) {

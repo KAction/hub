@@ -55,6 +55,41 @@ type GistFile struct {
 	RawUrl   string `json:"raw_url"`
 }
 
+type SearchPr struct {
+	Items []PullRequest `json:"items"`
+}
+
+func (client *Client) SearchPullRequests(project *Project, query string) (pulls []PullRequest, err error) {
+	api, err := client.simpleApi();
+	if err != nil {
+		return
+	}
+
+	q := url.Values{}
+	q.Add("q", fmt.Sprintf("is:pr repo:%s/%s %s", project.Owner, project.Name, query))
+	path := fmt.Sprintf("/search/issues?%s", q.Encode())
+
+	pulls = []PullRequest{}
+	var res *simpleResponse
+
+	res, err = api.GetFile(path, "application/json")
+	if err = checkStatus(200, "fetching pull requests", res, err); err != nil {
+		fmt.Printf("%v", err)
+		return
+	}
+
+	searchPr := SearchPr{Items: make([]PullRequest, 0)}
+	if err = res.Unmarshal(&searchPr); err != nil {
+		return
+	}
+
+	for _, pr := range searchPr.Items {
+		pulls = append(pulls, pr)
+	}
+
+	return
+}
+
 func (client *Client) FetchPullRequests(project *Project, filterParams map[string]interface{}, limit int, filter func(*PullRequest) bool) (pulls []PullRequest, err error) {
 	api, err := client.simpleApi()
 	if err != nil {
